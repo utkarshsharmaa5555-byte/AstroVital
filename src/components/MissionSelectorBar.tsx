@@ -18,6 +18,8 @@ import {
   PlayCircle,
   Activity,
   Layers,
+  Cpu,
+  Monitor,
 } from 'lucide-react';
 
 interface MissionSelectorBarProps {
@@ -30,6 +32,9 @@ interface MissionSelectorBarProps {
   onInjectScenario: (scenarioId: string) => void;
   onOpenFaceBiometrics: () => void;
   onOpenPVTTest: () => void;
+  onOpenDigitalTwin: () => void;
+  activeViewTab: 'MISSION_CONTROL' | 'DIGITAL_TWIN';
+  onToggleViewTab: (tab: 'MISSION_CONTROL' | 'DIGITAL_TWIN') => void;
   isLiveFaceActive: boolean;
 }
 
@@ -43,6 +48,9 @@ export function MissionSelectorBar({
   onInjectScenario,
   onOpenFaceBiometrics,
   onOpenPVTTest,
+  onOpenDigitalTwin,
+  activeViewTab,
+  onToggleViewTab,
   isLiveFaceActive,
 }: MissionSelectorBarProps) {
   const currentProfile = MISSION_PROFILES[currentMissionId] || MISSION_PROFILES.ISS;
@@ -118,6 +126,20 @@ export function MissionSelectorBar({
 
           {/* Quick Action Buttons */}
           <div className="flex items-center gap-1.5">
+            {/* DIGITAL TWIN BUTTON */}
+            <button
+              onClick={onOpenDigitalTwin}
+              className={`flex items-center gap-1.5 px-2.5 py-1 border rounded text-[11px] transition-all ${
+                activeViewTab === 'DIGITAL_TWIN'
+                  ? 'bg-flight-accent/25 border-flight-accent text-flight-accent font-bold shadow-[0_0_10px_rgba(163,113,247,0.3)]'
+                  : 'bg-spacecraft-panel hover:bg-spacecraft-card border-spacecraft-border text-gray-200'
+              }`}
+              title="Launch Astronaut Digital Twin & What-If Simulation Sandbox"
+            >
+              <Cpu className="w-3.5 h-3.5 text-flight-accent animate-pulse" />
+              <span>DIGITAL TWIN</span>
+            </button>
+
             <button
               onClick={onOpenFaceBiometrics}
               className="flex items-center gap-1.5 px-2.5 py-1 bg-spacecraft-panel hover:bg-spacecraft-card border border-spacecraft-border rounded text-[11px] text-gray-200 transition-colors"
@@ -141,34 +163,66 @@ export function MissionSelectorBar({
 
       {/* Main Interactive Control Bar */}
       <div className="px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
-        {/* Destination Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0">
-          <span className="text-[11px] text-gray-400 font-mono uppercase mr-2 flex items-center gap-1">
-            <Globe className="w-3.5 h-3.5 text-gray-400" /> PROFILE:
-          </span>
-          {Object.values(MISSION_PROFILES).map((prof) => {
-            const isActive = prof.id === currentMissionId;
-            return (
-              <button
-                key={prof.id}
-                onClick={() => onSelectMission(prof.id)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-mono transition-all border ${
-                  isActive
-                    ? 'bg-flight-info/15 border-flight-info text-flight-info font-bold shadow-[0_0_8px_rgba(88,166,255,0.25)]'
-                    : 'bg-spacecraft-card/80 border-spacecraft-border text-gray-300 hover:border-gray-500 hover:text-white'
-                }`}
-              >
-                <span>{prof.id}</span>
-                <span
-                  className={`text-[10px] px-1 py-0.2 rounded font-normal ${
-                    isActive ? 'bg-flight-info text-black font-semibold' : 'bg-spacecraft-panel text-gray-400'
+        {/* Left: View Modes & Destination Tabs */}
+        <div className="flex items-center gap-3">
+          {/* Main View Switcher (Cockpit vs. Digital Twin) */}
+          <div className="flex items-center bg-spacecraft-bg p-0.5 rounded border border-spacecraft-border text-xs font-mono">
+            <button
+              onClick={() => onToggleViewTab('MISSION_CONTROL')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm transition-colors ${
+                activeViewTab === 'MISSION_CONTROL'
+                  ? 'bg-spacecraft-borderHighlight text-white font-bold'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <Monitor className="w-3 h-3" />
+              <span>MISSION CONTROL</span>
+            </button>
+
+            <button
+              onClick={() => onToggleViewTab('DIGITAL_TWIN')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm transition-colors ${
+                activeViewTab === 'DIGITAL_TWIN'
+                  ? 'bg-flight-accent text-white font-bold'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <Cpu className="w-3 h-3" />
+              <span>DIGITAL TWIN LAB</span>
+            </button>
+          </div>
+
+          <div className="h-4 w-[1px] bg-spacecraft-border hidden md:block" />
+
+          {/* Destination Tabs */}
+          <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0">
+            <span className="text-[11px] text-gray-400 font-mono uppercase mr-2 flex items-center gap-1">
+              <Globe className="w-3.5 h-3.5 text-gray-400" /> PROFILE:
+            </span>
+            {Object.values(MISSION_PROFILES).map((prof) => {
+              const isActive = prof.id === currentMissionId;
+              return (
+                <button
+                  key={prof.id}
+                  onClick={() => onSelectMission(prof.id)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-mono transition-all border ${
+                    isActive
+                      ? 'bg-flight-info/15 border-flight-info text-flight-info font-bold shadow-[0_0_8px_rgba(88,166,255,0.25)]'
+                      : 'bg-spacecraft-card/80 border-spacecraft-border text-gray-300 hover:border-gray-500 hover:text-white'
                   }`}
                 >
-                  {prof.gravityLabel.split(' ')[0]}
-                </span>
-              </button>
-            );
-          })}
+                  <span>{prof.id}</span>
+                  <span
+                    className={`text-[10px] px-1 py-0.2 rounded font-normal ${
+                      isActive ? 'bg-flight-info text-black font-semibold' : 'bg-spacecraft-panel text-gray-400'
+                    }`}
+                  >
+                    {prof.gravityLabel.split(' ')[0]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Center / Right Control Selectors */}
