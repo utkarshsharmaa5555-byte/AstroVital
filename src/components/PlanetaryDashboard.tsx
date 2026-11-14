@@ -23,6 +23,7 @@ import { AIInsightPanel } from './AIInsightPanel';
 import { TrendCharts } from './TrendCharts';
 import { HardwareCueCardsModal } from './HardwareCueCardsModal';
 import { DigitalTwinView } from './DigitalTwinView';
+import { NeonSyncCard } from './NeonSyncCard';
 import {
   Activity,
   Heart,
@@ -498,6 +499,12 @@ export function PlanetaryDashboard() {
 
               {/* Right Column: Explainable AI Health Intelligence & Trend Plots (7 cols) */}
               <div className="lg:col-span-7 flex flex-col gap-4">
+                <NeonSyncCard
+                  mission={mission}
+                  astronaut={selectedAstronaut}
+                  telemetry={telemetryValues}
+                />
+
                 <AIInsightPanel
                   alerts={aiAlerts}
                   onOpenHardwareCueCard={handleOpenHardwareCueCard}
