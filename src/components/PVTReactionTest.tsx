@@ -14,16 +14,18 @@ import {
 } from 'lucide-react';
 
 interface PVTReactionTestProps {
-  isOpen: boolean;
-  onClose: () => void;
+  isOpen?: boolean;
+  isModal?: boolean;
+  onClose?: () => void;
   astronautName: string;
-  onRecordResult: (meanRT: number, lapses: number, cognitiveScore: number) => void;
+  onRecordResult?: (meanRT: number, lapses: number, cognitiveScore: number) => void;
 }
 
 type PVTState = 'IDLE' | 'WAITING' | 'TRIGGERED' | 'FALSE_START' | 'COMPLETED';
 
 export function PVTReactionTest({
-  isOpen,
+  isOpen = true,
+  isModal = true,
   onClose,
   astronautName,
   onRecordResult,
@@ -148,28 +150,32 @@ export function PVTReactionTest({
   const cognitiveScore = Math.max(15, Math.min(100, Math.round(baseScore - rtPenalty - lapsePenalty - falseStartPenalty)));
 
   const handleSaveResult = () => {
-    onRecordResult(avgRT, lapsesCount, cognitiveScore);
-    onClose();
+    if (onRecordResult) {
+      onRecordResult(avgRT, lapsesCount, cognitiveScore);
+    }
+    if (onClose) {
+      onClose();
+    }
   };
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
-      <div className="bg-spacecraft-surface border border-spacecraft-border rounded-lg max-w-xl w-full p-6 font-mono flex flex-col gap-4 shadow-2xl select-none">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-spacecraft-border pb-3">
-          <div className="flex items-center gap-2">
-            <Zap className="w-5 h-5 text-flight-nominal" />
-            <div>
-              <h2 className="text-sm font-bold text-white tracking-wider">
-                PSYCHOMOTOR VIGILANCE TEST (PVT-B // 30s)
-              </h2>
-              <p className="text-[11px] text-gray-400">
-                NASA Operational Cognitive Readiness Standard // Fast Reaction Time Evaluation
-              </p>
-            </div>
+  const content = (
+    <div className={`bg-spacecraft-surface border border-spacecraft-border rounded-[10px] w-full p-6 font-mono flex flex-col gap-4 select-none ${isModal ? 'max-w-xl shadow-2xl' : 'shadow-lg'}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-spacecraft-border pb-3">
+        <div className="flex items-center gap-2">
+          <Zap className="w-5 h-5 text-flight-nominal" />
+          <div>
+            <h2 className="text-sm font-bold text-white tracking-wider">
+              PSYCHOMOTOR VIGILANCE TEST (PVT-B // 30s)
+            </h2>
+            <p className="text-[11px] text-gray-400">
+              NASA Operational Cognitive Readiness Standard // Fast Reaction Time Evaluation
+            </p>
           </div>
+        </div>
+        {onClose && (
           <button
             onClick={() => {
               clearAllTimers();
@@ -179,7 +185,8 @@ export function PVTReactionTest({
           >
             <X className="w-5 h-5" />
           </button>
-        </div>
+        )}
+      </div>
 
         {/* Test Body */}
         {gameState === 'IDLE' && (
@@ -380,6 +387,15 @@ export function PVTReactionTest({
           </div>
         )}
       </div>
-    </div>
   );
+
+  if (isModal) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+        {content}
+      </div>
+    );
+  }
+
+  return content;
 }

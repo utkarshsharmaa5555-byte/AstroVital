@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   MissionId,
   MISSION_PROFILES,
@@ -9,650 +9,587 @@ import {
   SystemCategory,
 } from '@/config/missionProfiles';
 import {
+  AstronautProfile,
+  PRESET_ASTRONAUTS,
+  JUDGE_DEMO_SCENARIOS,
+} from '@/lib/baselineEngine';
+import {
   AstronautBaseline,
-  DEMO_ASTRONAUTS,
   evaluateCrossCorrelation,
   calculateBaselineDeviation,
   ExplainableAIAlert,
 } from '@/lib/healthIntelligence';
-import { MissionSelectorBar } from './MissionSelectorBar';
-import { FaceBiometricModal } from './FaceBiometricModal';
+
+import { BiometricLoginPage } from './BiometricLoginPage';
+import { CrewProfileStrip } from './CrewProfileStrip';
+import { LiveEquipmentSimulator } from './LiveEquipmentSimulator';
 import { AnatomyBodyMap } from './AnatomyBodyMap';
-import { PVTReactionTest } from './PVTReactionTest';
 import { AIInsightPanel } from './AIInsightPanel';
 import { TrendCharts } from './TrendCharts';
+import { PVTReactionTest } from './PVTReactionTest';
 import { HardwareCueCardsModal } from './HardwareCueCardsModal';
 import { DigitalTwinView } from './DigitalTwinView';
 import { NeonSyncCard } from './NeonSyncCard';
+
 import {
+  ShieldCheck,
   Activity,
   Heart,
   Wind,
-  ShieldAlert,
+  Zap,
+  TrendingUp,
+  Brain,
+  Clock,
   Radio,
-  Sliders,
-  CheckCircle,
-  AlertTriangle,
-  AlertOctagon,
-  FileText,
-  Thermometer,
   Layers,
-  ChevronRight,
-  Info,
-  ExternalLink,
   Cpu,
   Sparkles,
+  Database,
+  BookOpen,
+  UserCheck,
+  LogOut,
+  Globe,
+  ChevronRight,
+  Info,
+  Lock,
 } from 'lucide-react';
 
+type DiagnosticTabId = 'TRENDS' | 'BODY_MAP' | 'AI_INSIGHTS' | 'PVT_TEST';
+
 export function PlanetaryDashboard() {
+  // Authentication State: null means show BiometricLoginPage
+  const [authenticatedCrew, setAuthenticatedCrew] = useState<AstronautProfile | null>(null);
+
+  // Mission Destination State: ISS | MOON | MARS | DEEP_SPACE
   const [currentMissionId, setCurrentMissionId] = useState<MissionId>('ISS');
   const [activeRole, setActiveRole] = useState<'CREW' | 'CMO'>('CMO');
-  const [selectedAstronaut, setSelectedAstronaut] = useState<AstronautBaseline>(DEMO_ASTRONAUTS[0]);
 
-  // View switch: MISSION_CONTROL vs DIGITAL_TWIN
-  const [activeViewTab, setActiveViewTab] = useState<'MISSION_CONTROL' | 'DIGITAL_TWIN'>('MISSION_CONTROL');
+  // Active Diagnostic Tab: TRENDS | BODY_MAP | AI_INSIGHTS | PVT_TEST
+  const [activeTab, setActiveTab] = useState<DiagnosticTabId>('TRENDS');
 
-  // Modal states
-  const [isFaceModalOpen, setIsFaceModalOpen] = useState<boolean>(false);
-  const [isPVTModalOpen, setIsPVTModalOpen] = useState<boolean>(false);
-  const [isHardwareModalOpen, setIsHardwareModalOpen] = useState<boolean>(false);
-  const [isDigitalTwinModalOpen, setIsDigitalTwinModalOpen] = useState<boolean>(false);
+  // Active Judge Scenario
+  const [activeScenarioId, setActiveScenarioId] = useState<string>('nominal_orbit');
+
+  // Modals
+  const [isCueCardsOpen, setIsCueCardsOpen] = useState<boolean>(false);
   const [selectedCueCardId, setSelectedCueCardId] = useState<string | null>(null);
+  const [isDigitalTwinOpen, setIsDigitalTwinOpen] = useState<boolean>(false);
+  const [showNeonPanel, setShowNeonPanel] = useState<boolean>(false);
 
-  // Selected anatomical category from Body Map
-  const [selectedCategory, setSelectedCategory] = useState<SystemCategory | null>('OCULAR_NEURO');
+  // Selected Body Map Category
+  const [selectedBodyCategory, setSelectedBodyCategory] = useState<SystemCategory | null>('OCULAR_NEURO');
 
-  // Live face biometric indicators
-  const [isLiveFaceActive, setIsLiveFaceActive] = useState<boolean>(false);
-  const [liveEAR, setLiveEAR] = useState<number>(0.32);
-  const [liveEdemaDelta, setLiveEdemaDelta] = useState<number>(4.2);
+  // Live ticking MET clock
+  const [metSeconds, setMetSeconds] = useState<number>(114 * 86400 + 8 * 3600 + 22 * 60 + 15);
 
-  const mission = getMissionProfile(currentMissionId);
-
-  // Active telemetry values (seeded with nominal or scenario defaults)
-  const [telemetryValues, setTelemetryValues] = useState<Record<string, number>>({});
-  const [environmentValues, setEnvironmentValues] = useState<Record<string, number>>({});
-
-  // Reset telemetry whenever mission profile changes
   useEffect(() => {
-    const initialPhys: Record<string, number> = {};
-    mission.physiologicalParameters.forEach((p) => {
-      initialPhys[p.id] = (p.nominalRange[0] + p.nominalRange[1]) / 2;
-    });
+    const timer = setInterval(() => {
+      setMetSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-    const initialEnv: Record<string, number> = {};
-    mission.environmentalParameters.forEach((e) => {
-      initialEnv[e.id] = (e.nominalRange[0] + e.nominalRange[1]) / 2;
-    });
+  const formatMET = (totalSec: number) => {
+    const days = Math.floor(totalSec / 86400);
+    const hours = Math.floor((totalSec % 86400) / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+    const secs = totalSec % 60;
+    return `${days.toString().padStart(3, '0')}:${hours
+      .toString()
+      .padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs
+      .toString()
+      .padStart(2, '0')}`;
+  };
 
-    setTelemetryValues(initialPhys);
-    setEnvironmentValues(initialEnv);
-    setSelectedCategory(mission.prioritySystems[0]?.category || 'CARDIOVASCULAR');
-  }, [currentMissionId]);
+  const currentMission = getMissionProfile(currentMissionId);
 
-  // Sync face biometrics to telemetry stream if active
-  useEffect(() => {
-    if (isLiveFaceActive) {
-      setTelemetryValues((prev) => ({
-        ...prev,
-        SANS_EDEMA_INDEX: liveEdemaDelta,
-        OCULAR_EAR: liveEAR,
-      }));
-    }
-  }, [liveEAR, liveEdemaDelta, isLiveFaceActive]);
+  // Telemetry values state
+  const [telemetryValues, setTelemetryValues] = useState<Record<string, number>>({
+    HEART_RATE: 64,
+    BODY_TEMP: 36.8,
+    BP_SYS: 116,
+    BP_DIA: 74,
+    CABIN_PRESSURE: 14.7,
+    BLOOD_GLUCOSE: 90,
+    BLOOD_POTASSIUM: 4.2,
+    OCULAR_IOP: 14.8,
+    SANS_FLUID_INDEX: 4.0,
+    PVT_MEAN_REACTION_TIME: 220,
+    RESP_RATE: 14,
+    RADIATION_FLUX: 0.04,
+    HRV_SDNN: 76,
+    O2_PERCENT: 20.9,
+    CO2_PP: 2.8,
+  });
 
-  // Inject a preset mission scenario / anomaly
-  const handleInjectScenario = (scenarioId: string) => {
-    const scenario = mission.scenarios.find((s) => s.id === scenarioId);
+  const [environmentValues, setEnvironmentValues] = useState<Record<string, number>>({
+    CABIN_PRESSURE: 14.7,
+    CABIN_CO2: 2.8,
+    CABIN_O2: 20.9,
+    LUNAR_REGOLITH_DUST: 0.12,
+    MARTIAN_DUST_PM10: 0.18,
+    SPE_RADIATION_FLUX: 0.05,
+  });
+
+  // Handle Scenario Selection
+  const handleSelectScenario = useCallback((scenarioId: string) => {
+    setActiveScenarioId(scenarioId);
+    const scenario = JUDGE_DEMO_SCENARIOS.find((s) => s.id === scenarioId);
     if (!scenario) return;
 
     setTelemetryValues((prev) => ({
       ...prev,
-      ...scenario.overrideTelemetry,
+      HEART_RATE: scenario.overrides.heartRate,
+      BODY_TEMP: scenario.overrides.bodyTemp,
+      BP_SYS: scenario.overrides.bloodPressureSys,
+      BP_DIA: scenario.overrides.bloodPressureDia,
+      CABIN_PRESSURE: scenario.overrides.cabinPressure,
+      BLOOD_GLUCOSE: scenario.overrides.bloodGlucose ?? prev.BLOOD_GLUCOSE,
+      BLOOD_POTASSIUM: scenario.overrides.bloodPotassium ?? prev.BLOOD_POTASSIUM,
+      OCULAR_IOP: scenario.overrides.intraocularPressure ?? prev.OCULAR_IOP,
+      SANS_FLUID_INDEX: scenario.overrides.sansFluidIndex ?? prev.SANS_FLUID_INDEX,
+      PVT_MEAN_REACTION_TIME: scenario.overrides.pvtReactionTime ?? prev.PVT_MEAN_REACTION_TIME,
+      RESP_RATE: scenario.overrides.respiratoryRate ?? prev.RESP_RATE,
+      RADIATION_FLUX: scenario.overrides.radiationFlux ?? prev.RADIATION_FLUX,
+    }));
+  }, []);
+
+  // Update mission environment adaptation
+  const handleSelectMission = (missionId: MissionId) => {
+    setCurrentMissionId(missionId);
+    const newMission = getMissionProfile(missionId);
+
+    // Adapt nominal cabin pressure: 14.7 psia for ISS & Deep Space; 8.2 psia for Moon/Mars Exploration
+    const targetPressure = missionId === 'MOON' || missionId === 'MARS' ? 8.2 : 14.7;
+    setTelemetryValues((prev) => ({
+      ...prev,
+      CABIN_PRESSURE: targetPressure,
     }));
 
     setEnvironmentValues((prev) => ({
       ...prev,
-      ...scenario.overrideEnvironment,
+      CABIN_PRESSURE: targetPressure,
     }));
+
+    if (newMission.prioritySystems[0]) {
+      setSelectedBodyCategory(newMission.prioritySystems[0].category);
+    }
   };
 
-  // Evaluate AI cross-correlation rules & alerts
-  const aiAlerts = useMemo(() => {
-    return evaluateCrossCorrelation(mission, telemetryValues, environmentValues, selectedAstronaut);
-  }, [mission, telemetryValues, environmentValues, selectedAstronaut]);
+  // Convert baseline profile to AstronautBaseline for downstream legacy charts
+  const astronautBaseline: AstronautBaseline = useMemo(() => {
+    const astro = authenticatedCrew || PRESET_ASTRONAUTS[0];
+    return {
+      id: astro.id,
+      name: astro.name,
+      callsign: astro.callsign,
+      role: astro.role,
+      age: astro.age,
+      gender: astro.name.includes('Elena') ? 'Female' : 'Male',
+      flightExperienceDays: 342,
+      preflightBaselines: {
+        restingHeartRate: { mean: astro.baselines.heartRate.mean, sd: 3.5, unit: 'BPM' },
+        hrvSdnn: { mean: 78, sd: 7.2, unit: 'ms' },
+        systolicBP: { mean: astro.baselines.bloodPressureSys.mean, sd: 4.8, unit: 'mmHg' },
+        diastolicBP: { mean: astro.baselines.bloodPressureDia.mean, sd: 3.6, unit: 'mmHg' },
+        vo2Max: { mean: 48.5, sd: 1.8, unit: 'mL/kg/min' },
+        eyeAspectRatio: { mean: 0.33, sd: 0.02, unit: 'ratio' },
+        facialWidthToHeightRatio: { mean: 1.34, sd: 0.015, unit: 'ratio' },
+        sleepEfficiency: { mean: 89, sd: 4.0, unit: '%' },
+        pvtMedianLatency: { mean: astro.baselines.pvtReactionTime.mean, sd: 14.5, unit: 'ms' },
+        boneMineralDensityTScore: { mean: 1.1, sd: 0.15, unit: 'T-score' },
+      },
+    };
+  }, [authenticatedCrew]);
 
-  // Compute flight statuses for each anatomical category
-  const categoryStatuses = useMemo(() => {
-    const statuses: Record<SystemCategory, FlightStatus> = {
-      CARDIOVASCULAR: 'NOMINAL',
+  // AI Alerts derived from cross-variable correlation
+  const aiAlerts: ExplainableAIAlert[] = useMemo(() => {
+    return evaluateCrossCorrelation(
+      currentMission,
+      telemetryValues,
+      environmentValues,
+      astronautBaseline
+    );
+  }, [currentMission, telemetryValues, environmentValues, astronautBaseline]);
+
+  // Category status map for Body Map
+  const categoryStatuses: Record<SystemCategory, FlightStatus> = useMemo(() => {
+    const map: Record<SystemCategory, FlightStatus> = {
       OCULAR_NEURO: 'NOMINAL',
+      CARDIOVASCULAR: 'NOMINAL',
       RESPIRATORY_DUST: 'NOMINAL',
       MUSCULOSKELETAL: 'NOMINAL',
       METABOLIC_HYDRATION: 'NOMINAL',
       IMMUNE_RADIATION: 'NOMINAL',
     };
 
-    // Apply rule alerts
-    aiAlerts.forEach((alert) => {
-      if (alert.severity === 'WARNING') {
-        statuses[alert.targetCategory] = 'WARNING';
-      } else if (alert.severity === 'CAUTION' && statuses[alert.targetCategory] !== 'WARNING') {
-        statuses[alert.targetCategory] = 'CAUTION';
+    aiAlerts.forEach((a) => {
+      if (a.targetCategory && map[a.targetCategory] !== undefined) {
+        if (a.severity === 'WARNING') {
+          map[a.targetCategory] = 'WARNING';
+        } else if (a.severity === 'CAUTION' && map[a.targetCategory] !== 'WARNING') {
+          map[a.targetCategory] = 'CAUTION';
+        }
       }
     });
 
-    // Check individual physiological parameter thresholds
-    mission.physiologicalParameters.forEach((p) => {
-      const val = telemetryValues[p.id];
-      if (val === undefined) return;
+    return map;
+  }, [aiAlerts]);
 
-      const isWarning = val < p.warningRange[0] || val > p.warningRange[1];
-      const isCaution = val < p.cautionRange[0] || val > p.cautionRange[1];
+  // If user is not yet logged in, render the clean Stage 1 Biometric Login Screen
+  if (!authenticatedCrew) {
+    return (
+      <BiometricLoginPage
+        onLogin={(astro) => {
+          setAuthenticatedCrew(astro);
+          // Apply astronaut's baseline mean defaults
+          setTelemetryValues((prev) => ({
+            ...prev,
+            HEART_RATE: astro.baselines.heartRate.mean,
+            BODY_TEMP: astro.baselines.bodyTemp.mean,
+            BP_SYS: astro.baselines.bloodPressureSys.mean,
+            BP_DIA: astro.baselines.bloodPressureDia.mean,
+          }));
+        }}
+      />
+    );
+  }
 
-      if (isWarning) {
-        statuses[p.category] = 'WARNING';
-      } else if (isCaution && statuses[p.category] !== 'WARNING') {
-        statuses[p.category] = 'CAUTION';
-      }
-    });
-
-    return statuses;
-  }, [aiAlerts, mission, telemetryValues]);
-
-  // Handle open hardware cue card
-  const handleOpenHardwareCueCard = (cueCardId: string) => {
+  // Open specific cue card
+  const handleOpenCueCard = (cueCardId: string) => {
     setSelectedCueCardId(cueCardId);
-    setIsHardwareModalOpen(true);
+    setIsCueCardsOpen(true);
   };
 
-  // Handle PVT test results
-  const handleRecordPVTResult = (meanRT: number, lapses: number, cognitiveScore: number) => {
+  // Record PVT result into telemetry
+  const handleRecordPVT = (avgRT: number, lapses: number, cognitiveScore: number) => {
     setTelemetryValues((prev) => ({
       ...prev,
-      PVT_MEAN_REACTION_TIME: meanRT,
+      PVT_MEAN_REACTION_TIME: avgRT,
       PVT_LAPSES: lapses,
+      COGNITIVE_SCORE: cognitiveScore,
     }));
   };
 
-  // Handle new custom astronaut enrollment
-  const handleEnrollCustomAstronaut = (name: string, callsign: string, descriptor: number[]) => {
-    const newAstro: AstronautBaseline = {
-      id: `CUSTOM-${Date.now()}`,
-      name,
-      callsign,
-      role: 'Mission Specialist / Live Biometric Enrolled',
-      age: 35,
-      gender: 'Other',
-      flightExperienceDays: 0,
-      preflightBaselines: {
-        restingHeartRate: { mean: 60, sd: 4, unit: 'BPM' },
-        hrvSdnn: { mean: 70, sd: 6, unit: 'ms' },
-        systolicBP: { mean: 115, sd: 5, unit: 'mmHg' },
-        diastolicBP: { mean: 75, sd: 4, unit: 'mmHg' },
-        vo2Max: { mean: 50, sd: 2, unit: 'mL/kg/min' },
-        eyeAspectRatio: { mean: 0.32, sd: 0.02, unit: 'ratio' },
-        facialWidthToHeightRatio: { mean: 1.35, sd: 0.02, unit: 'ratio' },
-        sleepEfficiency: { mean: 88, sd: 4, unit: '%' },
-        pvtMedianLatency: { mean: 220, sd: 15, unit: 'ms' },
-        boneMineralDensityTScore: { mean: 1.2, sd: 0.1, unit: 'T-score' },
-      },
-      faceDescriptorVector: descriptor,
-    };
-    setSelectedAstronaut(newAstro);
-  };
-
-  // Helper for telemetry status badge
-  const getParamStatus = (
-    val: number,
-    nom: [number, number],
-    caut: [number, number],
-    warn: [number, number]
-  ): FlightStatus => {
-    if (val < warn[0] || val > warn[1]) return 'WARNING';
-    if (val < caut[0] || val > caut[1]) return 'CAUTION';
-    return 'NOMINAL';
-  };
+  const destinations: { id: MissionId; label: string; gravity: string; owlt: string }[] = [
+    { id: 'ISS', label: 'ISS (Low Earth Orbit)', gravity: '0g Microgravity', owlt: '0.1s Comms Link' },
+    { id: 'MOON', label: 'MOON (Artemis Base Camp)', gravity: '1/6g Hypogravity', owlt: '1.3s Comms Delay' },
+    { id: 'MARS', label: 'MARS (Surface Habitat)', gravity: '3/8g Gravity', owlt: '14.2m Comms Delay' },
+    { id: 'DEEP_SPACE', label: 'DEEP SPACE (Transit Gateway)', gravity: '0g Transit', owlt: '48.5m Comms Delay' },
+  ];
 
   return (
-    <div className="min-h-screen bg-spacecraft-bg text-gray-200 flex flex-col font-mono selection:bg-flight-info selection:text-black">
-      {/* 1. Header & Planetary Mission Selector */}
-      <MissionSelectorBar
-        currentMissionId={currentMissionId}
-        onSelectMission={(id) => setCurrentMissionId(id)}
-        activeRole={activeRole}
-        onToggleRole={(role) => setActiveRole(role)}
-        selectedAstronaut={selectedAstronaut}
-        onSelectAstronaut={(astro) => setSelectedAstronaut(astro)}
-        onInjectScenario={handleInjectScenario}
-        onOpenFaceBiometrics={() => setIsFaceModalOpen(true)}
-        onOpenPVTTest={() => setIsPVTModalOpen(true)}
-        onOpenDigitalTwin={() => setIsDigitalTwinModalOpen(true)}
-        activeViewTab={activeViewTab}
-        onToggleViewTab={(tab) => setActiveViewTab(tab)}
-        isLiveFaceActive={isLiveFaceActive}
-      />
-
-      {/* Main Mission Control Cockpit or Digital Twin View */}
-      <main className="flex-1 p-4 max-w-[1680px] w-full mx-auto flex flex-col gap-4">
-        {activeViewTab === 'DIGITAL_TWIN' ? (
-          /* Dedicated Digital Twin Simulation Lab View */
-          <DigitalTwinView
-            mission={mission}
-            astronaut={selectedAstronaut}
-            telemetry={telemetryValues}
-          />
-        ) : (
-          /* Mission Control Overview Cockpit */
-          <>
-            {/* Mission Status Bar */}
-            <div className="bg-spacecraft-surface p-3.5 rounded border border-spacecraft-border flex flex-wrap items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-3">
-                <span className="font-bold text-white text-sm">{mission.name}</span>
-                <span className="px-2 py-0.5 rounded bg-spacecraft-card text-flight-info border border-spacecraft-border font-semibold">
-                  {mission.gravityLabel}
-                </span>
-                <span className="text-gray-400 hidden md:inline">DESTINATION: {mission.destination}</span>
+    <div className="min-h-screen bg-[#0B0E14] text-white flex flex-col font-sans selection:bg-[#58A6FF]/30">
+      {/* 1. TOP AEROSPACE COMMAND & TELEMETRY CONTROL BAR */}
+      <header className="w-full bg-[#131822] border-b border-[#262E3D] px-4 sm:px-6 py-3 select-none sticky top-0 z-40 shadow-md">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+          {/* Logo & Operational Badges */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-md bg-[#0B0E14] border border-[#262E3D] flex items-center justify-center text-[#58A6FF]">
+                <Activity className="w-4 h-4 text-[#2EA043] animate-pulse" />
               </div>
-
-              {/* Digital Twin Shortcut Badge in Status Bar */}
-              <button
-                onClick={() => setActiveViewTab('DIGITAL_TWIN')}
-                className="flex items-center gap-2 px-3 py-1 rounded bg-flight-accent/15 hover:bg-flight-accent/25 border border-flight-accent/40 text-flight-accent text-xs font-bold transition-all shadow-[0_0_8px_rgba(163,113,247,0.2)]"
-              >
-                <Cpu className="w-4 h-4 animate-pulse" />
-                <span>IN-SILICO DIGITAL TWIN: SYNCHRONIZED [99.4%]</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-
-              <div className="flex items-center gap-3 text-[11px]">
-                <span className="text-gray-400">RADIATION ENVIRONMENT:</span>
-                <span className="text-flight-caution font-semibold">{mission.radiationProfile}</span>
-              </div>
-            </div>
-
-            {/* Master Flight Alarm Banner if Warning Active */}
-            {aiAlerts.some((a) => a.severity === 'WARNING') && (
-              <div className="bg-flight-warning/15 border border-flight-warning p-3 rounded flex items-center justify-between gap-3 animate-pulse-warning">
-                <div className="flex items-center gap-2 text-flight-warning">
-                  <AlertOctagon className="w-5 h-5 shrink-0" />
-                  <div>
-                    <span className="font-bold text-xs uppercase tracking-wider">
-                      MASTER CAUTION / FLIGHT RULE THRESHOLD BREACHED:
-                    </span>{' '}
-                    <span className="text-xs text-white">
-                      {aiAlerts.find((a) => a.severity === 'WARNING')?.detectedPattern}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    const cueId = aiAlerts.find((a) => a.severity === 'WARNING')?.actionableCountermeasure
-                      .hardwareRefId;
-                    if (cueId) handleOpenHardwareCueCard(cueId);
-                  }}
-                  className="px-3 py-1 bg-flight-warning hover:bg-red-600 text-black font-bold rounded text-xs transition-colors shrink-0"
-                >
-                  ENGAGE CUE CARD COUNTERMEASURE
-                </button>
-              </div>
-            )}
-
-            {/* Top Grid: High Priority Physiological Telemetry + Environmental Pods */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Active Priority Vitals */}
-              {mission.physiologicalParameters.slice(0, 4).map((param) => {
-                const val = telemetryValues[param.id] ?? (param.nominalRange[0] + param.nominalRange[1]) / 2;
-                const status = getParamStatus(val, param.nominalRange, param.cautionRange, param.warningRange);
-
-                const isWarn = status === 'WARNING';
-                const isCaut = status === 'CAUTION';
-                const statusBorder = isWarn
-                  ? 'border-flight-warning'
-                  : isCaut
-                  ? 'border-flight-caution'
-                  : 'border-spacecraft-border';
-                const statusText = isWarn
-                  ? 'text-flight-warning'
-                  : isCaut
-                  ? 'text-flight-caution'
-                  : 'text-flight-nominal';
-
-                return (
-                  <div
-                    key={param.id}
-                    className={`bg-spacecraft-surface p-3.5 rounded border ${statusBorder} flex flex-col justify-between gap-2 shadow-sm`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] text-gray-400 tracking-tight font-semibold">
-                        {param.name}
-                      </span>
-                      <span
-                        className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
-                          isWarn
-                            ? 'bg-flight-warning text-black'
-                            : isCaut
-                            ? 'bg-flight-caution text-black'
-                            : 'bg-flight-nominal/20 text-flight-nominal'
-                        }`}
-                      >
-                        {status}
-                      </span>
-                    </div>
-
-                    <div className="flex items-baseline justify-between">
-                      <span className={`text-2xl font-bold font-mono tabular-nums ${statusText}`}>
-                        {val}
-                      </span>
-                      <span className="text-xs text-gray-400 font-mono">{param.unit}</span>
-                    </div>
-
-                    <div className="text-[10px] text-gray-500 border-t border-spacecraft-borderMuted pt-1 flex justify-between">
-                      <span>Nominal: {param.nominalRange[0]}–{param.nominalRange[1]} {param.unit}</span>
-                      <span className="text-flight-info font-bold">W{param.priorityWeight}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Middle Section: Environmental Pods (NASA-STD-3001 Habitat / Suit Telemetry) */}
-            <div className="bg-spacecraft-surface p-4 rounded border border-spacecraft-border flex flex-col gap-3">
-              <div className="flex items-center justify-between border-b border-spacecraft-border pb-2">
+              <div>
                 <div className="flex items-center gap-2">
-                  <Thermometer className="w-4 h-4 text-flight-info" />
-                  <h3 className="text-xs font-bold text-white tracking-wide">
-                    HABITAT & SUIT ENVIRONMENTAL TELEMETRY // NASA-STD-3001 ECLSS ARRAYS
-                  </h3>
+                  <span className="text-sm font-extrabold tracking-wider text-white">ASTROVITAL</span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#2EA043]/15 text-[#2EA043] border border-[#2EA043]/30 font-bold">
+                    NASA-STD-3001
+                  </span>
                 </div>
-                <span className="text-[10px] text-gray-400">
-                  REAL-TIME HABITAT LIFE SUPPORT FEED
+                <div className="text-[10px] font-mono text-gray-400">
+                  MULTI-PLANETARY ASTRONAUT HEALTH INTELLIGENCE
+                </div>
+              </div>
+            </div>
+
+            <div className="h-4 w-[1px] bg-[#262E3D] hidden lg:block" />
+
+            {/* Live Ticking MET */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#0B0E14] border border-[#262E3D] font-mono text-xs">
+              <Clock className="w-3.5 h-3.5 text-[#58A6FF]" />
+              <span className="text-gray-400 font-semibold">MET:</span>
+              <span className="text-white font-bold tabular-nums">{formatMET(metSeconds)}</span>
+            </div>
+
+            {/* Data Provenance Badge */}
+            <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#0B0E14] border border-[#262E3D] font-mono text-[10px] text-[#58A6FF]">
+              <Radio className="w-3 h-3 text-[#2EA043] animate-ping" />
+              <span>[SIMULATED TELEMETRY // NASA-STD-3001 REFERENCE MODEL]</span>
+            </div>
+          </div>
+
+          {/* Role Switcher & Auxiliary Tools */}
+          <div className="flex flex-wrap items-center gap-2.5 font-mono text-xs">
+            {/* Role Switcher */}
+            <div className="flex items-center bg-[#0B0E14] rounded-md border border-[#262E3D] p-0.5">
+              <button
+                onClick={() => setActiveRole('CREW')}
+                className={`px-2.5 py-1 rounded text-[11px] font-semibold transition ${
+                  activeRole === 'CREW'
+                    ? 'bg-[#18202E] text-white shadow-sm'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                CREW SELF-LOG
+              </button>
+              <button
+                onClick={() => setActiveRole('CMO')}
+                className={`px-2.5 py-1 rounded text-[11px] font-semibold transition ${
+                  activeRole === 'CMO'
+                    ? 'bg-[#58A6FF] text-black font-bold shadow-sm'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                CMO CONSOLE
+              </button>
+            </div>
+
+            {/* Digital Twin Modal Button */}
+            <button
+              onClick={() => setIsDigitalTwinOpen(true)}
+              className="px-2.5 py-1.5 rounded bg-[#18202E] hover:bg-[#20293A] border border-[#262E3D] text-[11px] text-gray-200 flex items-center gap-1.5 transition"
+            >
+              <Cpu className="w-3.5 h-3.5 text-[#58A6FF]" />
+              <span>DIGITAL TWIN</span>
+            </button>
+
+            {/* Hardware Cue Cards Button */}
+            <button
+              onClick={() => {
+                setSelectedCueCardId(null);
+                setIsCueCardsOpen(true);
+              }}
+              className="px-2.5 py-1.5 rounded bg-[#18202E] hover:bg-[#20293A] border border-[#262E3D] text-[11px] text-gray-200 flex items-center gap-1.5 transition"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-[#D29922]" />
+              <span>CUE CARDS</span>
+            </button>
+
+            {/* Neon DB Sync Toggle */}
+            <button
+              onClick={() => setShowNeonPanel(!showNeonPanel)}
+              className="px-2.5 py-1.5 rounded bg-[#18202E] hover:bg-[#20293A] border border-[#262E3D] text-[11px] text-emerald-400 flex items-center gap-1.5 transition"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>NEON DB</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* 2. PLANETARY DESTINATION SELECTOR BAR */}
+      <nav className="w-full bg-[#0F141E] border-b border-[#262E3D] px-4 sm:px-6 py-2.5 select-none">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-2 font-mono text-xs text-gray-400">
+            <Globe className="w-4 h-4 text-[#58A6FF]" />
+            <span className="font-semibold text-white">MISSION PROFILE:</span>
+          </div>
+
+          {/* Destination Buttons */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 md:max-w-2xl">
+            {destinations.map((dest) => {
+              const isSelected = currentMissionId === dest.id;
+              return (
+                <button
+                  key={dest.id}
+                  onClick={() => handleSelectMission(dest.id)}
+                  className={`px-3 py-2 rounded-[6px] border text-left font-mono transition flex flex-col ${
+                    isSelected
+                      ? 'bg-[#18202E] border-[#58A6FF] text-white ring-1 ring-[#58A6FF]/40'
+                      : 'bg-[#131822] border-[#262E3D] text-gray-400 hover:text-white hover:border-gray-500'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold truncate">
+                      {dest.id === 'DEEP_SPACE' ? 'DEEP SPACE' : dest.id}
+                    </span>
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        isSelected ? 'bg-[#58A6FF]' : 'bg-gray-600'
+                      }`}
+                    />
+                  </div>
+                  <div className="text-[10px] text-gray-500 mt-0.5 truncate">{dest.gravity}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Planetary Physics Info Pill */}
+          <div className="hidden lg:flex items-center gap-3 px-3 py-1.5 rounded bg-[#131822] border border-[#262E3D] font-mono text-[11px] text-gray-300">
+            <span className="text-[#58A6FF] font-semibold">
+              OWLT COMMS DELAY: {currentMission.owltLabel}
+            </span>
+            <span className="text-gray-500">•</span>
+            <span>PRESSURE TARGET: {currentMissionId === 'MOON' || currentMissionId === 'MARS' ? '8.2' : '14.7'} psia</span>
+          </div>
+        </div>
+      </nav>
+
+      {/* MAIN COCKPIT VIEWPORT */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 md:p-8 flex flex-col gap-6">
+        {/* Optional Neon DB Health & Telemetry Sync Card (Collapsible) */}
+        {showNeonPanel && (
+          <div className="animate-in fade-in duration-200">
+            <NeonSyncCard
+              mission={currentMission}
+              astronaut={astronautBaseline}
+              telemetry={telemetryValues}
+            />
+          </div>
+        )}
+
+        {/* STAGE 2: POST-LOGIN PROFILE OVERVIEW & STRICTLY ORDERED VITALS STRIP */}
+        <CrewProfileStrip
+          astronaut={authenticatedCrew}
+          missionId={currentMissionId}
+          liveVitals={{
+            bodyTemp: telemetryValues.BODY_TEMP,
+            heartRate: telemetryValues.HEART_RATE,
+            bloodPressureSys: telemetryValues.BP_SYS,
+            bloodPressureDia: telemetryValues.BP_DIA,
+            cabinPressure: telemetryValues.CABIN_PRESSURE,
+            o2Percent: telemetryValues.O2_PERCENT,
+          }}
+          onSwitchCrew={() => setAuthenticatedCrew(null)}
+        />
+
+        {/* STAGE 3: LIVE SPACE MEDICAL EQUIPMENT SIMULATOR & PRE-FLIGHT BASELINE DIVERGENCE */}
+        <LiveEquipmentSimulator
+          astronaut={authenticatedCrew}
+          activeScenarioId={activeScenarioId}
+          onSelectScenario={handleSelectScenario}
+          telemetry={telemetryValues}
+          onOpenHardwareCueCard={handleOpenCueCard}
+        />
+
+        {/* STAGE 4: 4 CLEAN DIAGNOSTIC TABS & ENVIRONMENT-ADAPTIVE VIEWS */}
+        <div className="w-full flex flex-col gap-4">
+          {/* Tab Selection Bar */}
+          <div className="flex items-center border-b border-[#262E3D] bg-[#131822] rounded-t-[10px] px-2 overflow-x-auto">
+            <button
+              onClick={() => setActiveTab('TRENDS')}
+              className={`py-3 px-4 font-mono text-xs font-bold tracking-wider flex items-center gap-2 whitespace-nowrap transition-colors border-b-2 ${
+                activeTab === 'TRENDS'
+                  ? 'border-[#58A6FF] text-[#58A6FF]'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <TrendingUp className="w-4 h-4" />
+              1. LIVE BASELINE & TRENDS (RECHARTS)
+            </button>
+
+            <button
+              onClick={() => setActiveTab('BODY_MAP')}
+              className={`py-3 px-4 font-mono text-xs font-bold tracking-wider flex items-center gap-2 whitespace-nowrap transition-colors border-b-2 ${
+                activeTab === 'BODY_MAP'
+                  ? 'border-[#58A6FF] text-[#58A6FF]'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <Activity className="w-4 h-4" />
+              2. INTERACTIVE BODY MAP & SELF-EXAM
+            </button>
+
+            <button
+              onClick={() => setActiveTab('AI_INSIGHTS')}
+              className={`py-3 px-4 font-mono text-xs font-bold tracking-wider flex items-center gap-2 whitespace-nowrap transition-colors border-b-2 ${
+                activeTab === 'AI_INSIGHTS'
+                  ? 'border-[#58A6FF] text-[#58A6FF]'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <Brain className="w-4 h-4" />
+              3. EXPLAINABLE AI RISK & PREDICTIONS
+              {aiAlerts.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-[#F85149]/20 text-[#F85149] text-[10px] font-bold">
+                  {aiAlerts.length}
                 </span>
-              </div>
+              )}
+            </button>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {mission.environmentalParameters.map((env) => {
-                  const val = environmentValues[env.id] ?? (env.nominalRange[0] + env.nominalRange[1]) / 2;
-                  const status = getParamStatus(val, env.nominalRange, env.cautionRange, env.warningRange);
+            <button
+              onClick={() => setActiveTab('PVT_TEST')}
+              className={`py-3 px-4 font-mono text-xs font-bold tracking-wider flex items-center gap-2 whitespace-nowrap transition-colors border-b-2 ${
+                activeTab === 'PVT_TEST'
+                  ? 'border-[#58A6FF] text-[#58A6FF]'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <Zap className="w-4 h-4" />
+              4. 30-SEC COGNITIVE REACTION TEST (PVT)
+            </button>
+          </div>
 
-                  const isWarn = status === 'WARNING';
-                  const isCaut = status === 'CAUTION';
-                  const borderCol = isWarn
-                    ? 'border-flight-warning bg-flight-warning/10'
-                    : isCaut
-                    ? 'border-flight-caution bg-flight-caution/10'
-                    : 'border-spacecraft-border bg-spacecraft-panel';
+          {/* Active Tab Content Panes */}
+          <div className="w-full">
+            {activeTab === 'TRENDS' && (
+              <TrendCharts
+                mission={currentMission}
+                selectedAstronaut={astronautBaseline}
+                telemetry={telemetryValues}
+              />
+            )}
 
-                  return (
-                    <div
-                      key={env.id}
-                      className={`p-3 rounded border ${borderCol} flex flex-col justify-between gap-1.5`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-xs font-bold text-white">{env.name}</span>
-                        <span
-                          className={`text-[9px] px-1 py-0.2 rounded font-bold uppercase shrink-0 ${
-                            isWarn
-                              ? 'bg-flight-warning text-black'
-                              : isCaut
-                              ? 'bg-flight-caution text-black'
-                              : 'bg-flight-nominal/20 text-flight-nominal'
-                          }`}
-                        >
-                          {status}
-                        </span>
-                      </div>
+            {activeTab === 'BODY_MAP' && (
+              <AnatomyBodyMap
+                mission={currentMission}
+                selectedCategory={selectedBodyCategory}
+                onSelectCategory={(cat) => setSelectedBodyCategory(cat)}
+                telemetry={telemetryValues}
+                categoryStatuses={categoryStatuses}
+              />
+            )}
 
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-xl font-bold font-mono text-white tabular-nums">
-                          {val}
-                        </span>
-                        <span className="text-xs text-gray-400">{env.unit}</span>
-                      </div>
+            {activeTab === 'AI_INSIGHTS' && (
+              <AIInsightPanel
+                alerts={aiAlerts}
+                onOpenHardwareCueCard={handleOpenCueCard}
+                activeRole={activeRole}
+              />
+            )}
 
-                      <div className="text-[10px] text-gray-400 leading-tight">
-                        {env.nasaStandardRef}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Main Operational Split: Anatomy Body Map + AI Insights & Diagnostic Center */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-              {/* Left Column: Anatomical Body Map & Target Inspection (5 cols) */}
-              <div className="lg:col-span-5 flex flex-col gap-4">
-                <AnatomyBodyMap
-                  mission={mission}
-                  selectedCategory={selectedCategory}
-                  onSelectCategory={(cat) => setSelectedCategory(cat)}
-                  telemetry={telemetryValues}
-                  categoryStatuses={categoryStatuses}
+            {activeTab === 'PVT_TEST' && (
+              <div className="bg-[#131822] border border-[#262E3D] rounded-b-[10px] p-4 sm:p-6">
+                <PVTReactionTest
+                  isOpen={true}
+                  isModal={false}
+                  astronautName={authenticatedCrew.name}
+                  onRecordResult={handleRecordPVT}
                 />
-
-                {/* Selected System Focus Card */}
-                {selectedCategory && (
-                  <div className="bg-spacecraft-surface p-4 rounded border border-spacecraft-border flex flex-col gap-2.5">
-                    <div className="flex items-center justify-between border-b border-spacecraft-border pb-2">
-                      <span className="text-xs font-bold text-white">
-                        INSPECTION TARGET: {selectedCategory.replace('_', ' ')}
-                      </span>
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                          categoryStatuses[selectedCategory] === 'WARNING'
-                            ? 'bg-flight-warning text-black'
-                            : categoryStatuses[selectedCategory] === 'CAUTION'
-                            ? 'bg-flight-caution text-black'
-                            : 'bg-flight-nominal/20 text-flight-nominal'
-                        }`}
-                      >
-                        STATUS: {categoryStatuses[selectedCategory]}
-                      </span>
-                    </div>
-
-                    {/* Filtered telemetry for this anatomical system */}
-                    <div className="flex flex-col gap-1.5">
-                      {mission.physiologicalParameters
-                        .filter((p) => p.category === selectedCategory)
-                        .map((p) => {
-                          const val = telemetryValues[p.id] ?? (p.nominalRange[0] + p.nominalRange[1]) / 2;
-                          return (
-                            <div
-                              key={p.id}
-                              className="flex items-center justify-between p-2 rounded bg-spacecraft-panel text-xs border border-spacecraft-borderMuted"
-                            >
-                              <div>
-                                <span className="font-semibold text-gray-200">{p.name}</span>
-                                <div className="text-[10px] text-gray-400">{p.nasaRef}</div>
-                              </div>
-                              <div className="flex items-baseline gap-1.5 font-mono">
-                                <span className="text-white font-bold">{val}</span>
-                                <span className="text-gray-400 text-[10px]">{p.unit}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-
-                    {/* Action buttons */}
-                    <div className="pt-1 flex flex-col gap-2">
-                      <button
-                        onClick={() => setIsDigitalTwinModalOpen(true)}
-                        className="w-full py-2 bg-flight-accent/15 hover:bg-flight-accent/25 text-flight-accent rounded text-xs font-bold border border-flight-accent/40 flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <Cpu className="w-4 h-4" />
-                        <span>TEST COUNTERMEASURE ON DIGITAL TWIN</span>
-                      </button>
-
-                      <button
-                        onClick={() => setIsHardwareModalOpen(true)}
-                        className="w-full py-2 bg-spacecraft-card hover:bg-spacecraft-border text-flight-info rounded text-xs font-bold border border-spacecraft-border flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <FileText className="w-4 h-4" />
-                        <span>VIEW APPLICABLE HARDWARE CUE CARDS</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Right Column: Explainable AI Health Intelligence & Trend Plots (7 cols) */}
-              <div className="lg:col-span-7 flex flex-col gap-4">
-                <NeonSyncCard
-                  mission={mission}
-                  astronaut={selectedAstronaut}
-                  telemetry={telemetryValues}
-                />
-
-                <AIInsightPanel
-                  alerts={aiAlerts}
-                  onOpenHardwareCueCard={handleOpenHardwareCueCard}
-                  activeRole={activeRole}
-                />
-
-                <TrendCharts
-                  mission={mission}
-                  selectedAstronaut={selectedAstronaut}
-                  telemetry={telemetryValues}
-                />
-              </div>
-            </div>
-
-            {/* Role-Specific Diagnostic / Self-Log Console */}
-            {activeRole === 'CREW' ? (
-              <div className="bg-spacecraft-surface p-4 rounded border border-spacecraft-border flex flex-col gap-3">
-                <div className="flex items-center justify-between border-b border-spacecraft-border pb-2">
-                  <span className="text-xs font-bold text-white tracking-wide">
-                    CREW SELF-LOG // DAILY SUBJECTIVE & SYMPTOM ENTRY
-                  </span>
-                  <span className="text-[10px] text-gray-400">
-                    ASTRONAUT: {selectedAstronaut.name} ({selectedAstronaut.callsign})
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div className="bg-spacecraft-panel p-3 rounded border border-spacecraft-border flex flex-col gap-1.5">
-                    <span className="text-gray-400">HYDRATION INTAKE (L):</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      defaultValue="2.4"
-                      className="bg-spacecraft-card border border-spacecraft-border rounded px-2 py-1 text-white font-mono"
-                    />
-                  </div>
-                  <div className="bg-spacecraft-panel p-3 rounded border border-spacecraft-border flex flex-col gap-1.5">
-                    <span className="text-gray-400">POST-WORKOUT SORENESS (1-10):</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="10"
-                      defaultValue="3"
-                      className="bg-spacecraft-card border border-spacecraft-border rounded px-2 py-1 text-white font-mono"
-                    />
-                  </div>
-                  <div className="bg-spacecraft-panel p-3 rounded border border-spacecraft-border flex flex-col gap-1.5">
-                    <span className="text-gray-400">SUBJECTIVE SLEEP QUALITY (1-5):</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="5"
-                      defaultValue="4"
-                      className="bg-spacecraft-card border border-spacecraft-border rounded px-2 py-1 text-white font-mono"
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-spacecraft-surface p-4 rounded border border-spacecraft-border flex flex-col gap-3">
-                <div className="flex items-center justify-between border-b border-spacecraft-border pb-2">
-                  <span className="text-xs font-bold text-white tracking-wide">
-                    CMO (CREW MEDICAL OFFICER) DIAGNOSTIC & TELEMETRY SYNC CONSOLE
-                  </span>
-                  <span className="text-[10px] text-flight-info">
-                    DSN SYNC BUFFER: {mission.owltLabel} LATENCY
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-                  <div className="bg-spacecraft-panel p-3 rounded border border-spacecraft-border">
-                    <span className="text-gray-400 text-[10px]">PRE-FLIGHT BASELINE COMPARISON</span>
-                    <div className="text-white font-bold mt-1">
-                      Comparing current telemetry vs. L-30d personal mean ± SD
-                    </div>
-                  </div>
-                  <div className="bg-spacecraft-panel p-3 rounded border border-spacecraft-border">
-                    <span className="text-gray-400 text-[10px]">AUTONOMOUS TRIAGE ADVISORY</span>
-                    <div className="text-flight-nominal font-bold mt-1">
-                      No critical surgical or pharmacological intervention required
-                    </div>
-                  </div>
-                  <div className="bg-spacecraft-panel p-3 rounded border border-spacecraft-border">
-                    <span className="text-gray-400 text-[10px]">DOWNLINK TELEMETRY BUFFER</span>
-                    <div className="text-gray-300 font-bold mt-1">
-                      14 packets queued for Goldstone DSN pass
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
-          </>
-        )}
+          </div>
+        </div>
       </main>
 
-      {/* Persistent Scientific & Medical Accuracy Guardrail Footer */}
-      <footer className="w-full bg-spacecraft-surface border-t border-spacecraft-border px-4 py-3 mt-4 text-[11px] font-mono text-gray-400 select-none">
-        <div className="max-w-[1680px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-flight-info shrink-0" />
-            <span>
-              ASTROVITAL // 2026 NASA Space Apps Challenge Prototype. Implements reference models from{' '}
-              <span className="text-gray-200 font-semibold">NASA-STD-3001</span> and the{' '}
-              <span className="text-gray-200 font-semibold">NASA Human Research Program (HRP)</span>.
-            </span>
-          </div>
-
-          <div className="text-gray-500 text-[10px]">
-            NON-DIAGNOSTIC OPERATIONAL TELEMETRY & DECISION SUPPORT ONLY.
-          </div>
+      {/* FOOTER */}
+      <footer className="w-full bg-[#0F141E] border-t border-[#262E3D] px-6 py-4 mt-8 select-none">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between font-mono text-xs text-gray-500 gap-2">
+          <span>ASTROVITAL // 2026 NASA SPACE APPS CHALLENGE</span>
+          <span>FLIGHT CERTIFIED FOR ISS, ARTEMIS LUNAR SURFACE, AND MARS MISSIONS</span>
         </div>
       </footer>
 
-      {/* Modals */}
-      <FaceBiometricModal
-        isOpen={isFaceModalOpen}
-        onClose={() => setIsFaceModalOpen(false)}
-        selectedAstronaut={selectedAstronaut}
-        onUpdateBiometrics={(ear, edema, match) => {
-          setLiveEAR(ear);
-          setLiveEdemaDelta(edema);
-          setIsLiveFaceActive(true);
-        }}
-        onEnrollCustomAstronaut={handleEnrollCustomAstronaut}
-      />
-
-      <PVTReactionTest
-        isOpen={isPVTModalOpen}
-        onClose={() => setIsPVTModalOpen(false)}
-        astronautName={selectedAstronaut.name}
-        onRecordResult={handleRecordPVTResult}
-      />
-
+      {/* MODALS */}
+      {/* 1. Hardware Cue Cards Modal */}
       <HardwareCueCardsModal
-        isOpen={isHardwareModalOpen}
-        onClose={() => setIsHardwareModalOpen(false)}
+        isOpen={isCueCardsOpen}
+        onClose={() => setIsCueCardsOpen(false)}
         selectedCueCardId={selectedCueCardId}
         onSelectCueCard={(id) => setSelectedCueCardId(id)}
       />
 
-      {/* Digital Twin Modal */}
-      <DigitalTwinView
-        mission={mission}
-        astronaut={selectedAstronaut}
-        telemetry={telemetryValues}
-        isOpenAsModal={isDigitalTwinModalOpen}
-        onClose={() => setIsDigitalTwinModalOpen(false)}
-      />
+      {/* 2. Digital Twin What-If Simulator Modal */}
+      {isDigitalTwinOpen && (
+        <DigitalTwinView
+          mission={currentMission}
+          astronaut={astronautBaseline}
+          telemetry={telemetryValues}
+          isOpenAsModal={true}
+          onClose={() => setIsDigitalTwinOpen(false)}
+        />
+      )}
     </div>
   );
 }

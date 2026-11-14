@@ -11,26 +11,38 @@ const config: Config = {
       colors: {
         spacecraft: {
           bg: "#0B0E14",
-          surface: "#111622",
-          panel: "#161B26",
-          card: "#1B2230",
-          border: "#30363D",
-          borderMuted: "#21262D",
-          borderHighlight: "#484F58",
+          surface: "#0F141D",
+          panel: "#131822",
+          card: "#18202E",
+          cardHover: "#1E2738",
+          border: "#262E3D",
+          borderMuted: "#1B2230",
+          borderHighlight: "#3B475C",
         },
         flight: {
-          nominal: "#2EA043",
+          nominal: "#2EA043", // Soft Emerald Safe
           nominalGlow: "rgba(46, 160, 67, 0.2)",
-          caution: "#D29922",
+          caution: "#D29922", // Warm Amber Advisory
           cautionGlow: "rgba(210, 153, 34, 0.2)",
-          warning: "#F85149",
+          warning: "#F85149", // Coral Red Alert
           warningGlow: "rgba(248, 81, 73, 0.25)",
-          info: "#58A6FF",
+          info: "#58A6FF", // Telemetry Blue Baseline
           infoGlow: "rgba(88, 166, 255, 0.2)",
           accent: "#A371F7",
         },
       },
       fontFamily: {
+        sans: [
+          "Inter",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "'Segoe UI'",
+          "Roboto",
+          "Oxygen",
+          "Ubuntu",
+          "Cantarell",
+          "sans-serif",
+        ],
         mono: [
           "ui-monospace",
           "SFMono-Regular",
@@ -43,10 +55,12 @@ const config: Config = {
         ],
       },
       borderRadius: {
-        DEFAULT: "4px",
-        sm: "2px",
-        md: "4px",
-        lg: "6px",
+        DEFAULT: "10px",
+        sm: "6px",
+        md: "8px",
+        lg: "10px",
+        xl: "12px",
+        '2xl': "16px",
       },
       keyframes: {
         "pulse-warning": {
